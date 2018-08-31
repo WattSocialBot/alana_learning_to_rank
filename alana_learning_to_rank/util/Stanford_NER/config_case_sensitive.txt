@@ -1,0 +1,2 @@
+NER_HOST=localhost
+NER_PORT=7002

@@ -1,0 +1,24 @@
+{
+  "embedding_size": 128,
+  "max_vocab_size": 40000,
+  "max_ne_vocab_size": 1000,
+  "lr": 1e-3,
+  "clipnorm": 4.0,
+  "max_sequence_length": 30,
+  "max_context_turns": 3,
+  "epochs": 100,
+  "steps_per_epoch": 1000,
+  "batch_size": 32,
+  "loss_epsilon": 1e-6,
+  "dropout_prob": 0.1,
+  "mlp_sizes": [32],
+  "sentiment_features_number": 4,
+  "optimizer": "GradientDescentOptimizer",
+  "rnn_cell": "GRUCell",
+  "bidirectional": true,
+  "bot_sample_weights": {
+    "eliza": 10.0,
+    "news": 10.0,
+    "default": 1.0
+  }
+}
