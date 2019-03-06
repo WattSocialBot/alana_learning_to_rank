@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import tensorflow as tf
 
 
@@ -19,10 +21,12 @@ def batch_generator(X, y, sample_weights, batch_size):
     batch_counter = 0
     while batch_start_idx < y.shape[0]:
         if batch_counter % 100 == 0:
-            print 'Processed {} out of {} batches'.format(batch_counter, total_batches_number)
+            print('\rProcessed {} out of {} batches'.format(batch_counter, total_batches_number), end='')
         batch = ([X_i[batch_start_idx: batch_start_idx + batch_size] for X_i in X],
                  y[batch_start_idx: batch_start_idx + batch_size],
                  sample_weights[batch_start_idx: batch_start_idx + batch_size])
         batch_start_idx += batch_size
         batch_counter += 1
         yield batch
+    print('\n')
+

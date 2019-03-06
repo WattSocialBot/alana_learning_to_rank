@@ -6,7 +6,6 @@ import argparse
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tensorflow.contrib import rnn
 
 from config import get_config, DEFAULT_CONFIG
 from data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
@@ -50,15 +49,15 @@ def create_model(sentiment_features_number,
                                             [None, sentiment_features_number],
                                             name='X_answer_sentiment')
         X_timestamp_hour = tf.placeholder(tf.float32, [None, 1], name='X_timestamp')
-        X_bot_overlap = tf.placeholder(tf.float32, [None, 1], name='X_bot_overlap')
+        # X_bot_overlap = tf.placeholder(tf.float32, [None, 1], name='X_bot_overlap')
 
-        X_mlp_inputs = [X_question_sentiment, X_answer_sentiment, X_timestamp_hour, X_bot_overlap]
+        X_mlp_inputs = [X_question_sentiment, X_answer_sentiment, X_timestamp_hour]  # , X_bot_overlap]
         y = tf.placeholder(tf.float32, [None, 1], name='y')
 
         embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
                                  name='emb')
 
-        rnn_cell_class = getattr(rnn, rnn_cell)
+        rnn_cell_class = getattr(tf.nn.rnn_cell, rnn_cell)
         encoder = rnn_cell_class(embedding_size, name='encoder')
         if bidirectional:
             pass
@@ -138,9 +137,7 @@ def train(in_model,
             _, train_batch_loss = session.run([train_op, loss_op],
                                               feed_dict=feed_dict)
             train_batch_losses.append(train_batch_loss)
-        dev_eval_loss = evaluate_loss(in_model,
-                                      dev_data,
-                                      session)
+        dev_eval_loss = evaluate_loss(in_model, dev_data, session)
         print 'Epoch {} out of {} results'.format(epoch_counter, epochs)
         print 'train loss: {:.3f}'.format(np.mean(train_batch_losses))
         print 'dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(session.run(learning_rate))
@@ -167,7 +164,7 @@ def evaluate_loss(in_model,
     X_test, y_test, X_test_weights, = test_data
 
     if sample_weights is None:
-        sample_weights = np.ones(y_test.shape[0])
+        sample_weights = np.expand_dims(np.ones(y_test.shape[0]), -1)
     batch_sample_weight = tf.placeholder(tf.float32, [None, 1])
 
     # Define loss and optimizer
@@ -175,20 +172,24 @@ def evaluate_loss(in_model,
 
     batch_gen = batch_generator(X_test, y_test, sample_weights, batch_size)
     batch_losses = []
-    for batch_x, batch_y in batch_gen:
-        _, train_batch_loss = session.run([loss_op],
-                                          feed_dict={X: batch_x, y: batch_y})
+    for batch_x, batch_y, batch_w in batch_gen:
+        feed_dict = {X_i: batch_x_i for X_i, batch_x_i in zip(X, batch_x)}
+        feed_dict.update({y: batch_y, batch_sample_weight: batch_w})
+        train_batch_loss = session.run(loss_op, feed_dict=feed_dict)
         batch_losses.append(train_batch_loss)
     return np.mean(batch_losses)
 
 
-def load(in_model_folder):
-    with open(path.join(in_model_folder, 'rev_vocab')) as rev_vocab_in:
+def load(in_model_folder, in_session):
+    with open(os.path.join(in_model_folder, 'rev_vocab')) as rev_vocab_in:
         rev_vocab = json.load(rev_vocab_in)
-    model = load_model(path.join(in_model_folder, MODEL_FILENAME))
-    global TF_GRAPH
-    TF_GRAPH = tf.get_default_graph()
-    return model, rev_vocab
+    with open(os.path.join(in_model_folder, 'config.json')) as config_in:
+        config = json.load(config_in)
+    model = create_model(**config)
+    loader = tf.train.Saver()
+    loader.restore(path.join(in_model_folder, MODEL_FILENAME))
+
+    return model, config, rev_vocab
 
 
 def predict(in_model, in_X):
@@ -214,28 +215,26 @@ def load_vocabulary(in_file):
 
 def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
     # n lists (#context_turns) of lists
-    max_context_turns = config['max_context_turns']
-    max_sequence_length = config['max_sequence_length']
-    questions_tokenized = [[] for _ in xrange(max_context_turns)]
-    for context, context_nes in zip(in_table.context, in_table.context_ne):
-        context_turns = [[] for _ in xrange(max_context_turns - context)] + context_turns
-        for turn_idx, (turn, turn_nes) in enumerate(zip(context_turns, context_nes)):
-            questions_tokenized[turn_idx].append(turn + turn_nes)
+    questions_tokenized = [[] for _ in xrange(config['max_context_turns'])]
+    for context_turns, context_nes in zip(in_table.context, in_table.context_ne):
+        context_turns_padded = ['' for _ in xrange((config['max_context_turns'] - len(context_turns)))] + context_turns
+        for turn_idx, (turn, turn_nes) in enumerate(zip(context_turns_padded, context_nes)):
+            questions_tokenized[turn_idx].append(tokenize_utterance(turn,
+                                                                    remove_stopwords=False,
+                                                                    add_special_symbols=False) + turn_nes)
     answers_tokenized = []
     for answer, answer_nes in zip(in_table.answer, in_table.answer_ne):
-        answers_tokenized.append(answer + answer_nes)
+        answers_tokenized.append(tokenize_utterance(answer, remove_stopwords=False, add_special_symbols=False) + answer_nes)
 
     questions_vectorized = []
     for turns_list in questions_tokenized:
         questions_vectorized.append(vectorize_sequences(turns_list, in_rev_vocab))
     answers_vectorized = vectorize_sequences(answers_tokenized, in_rev_vocab)
-    questions_padded = [tf.keras.preprocessing.sequence.pad_sequences(questions_list,
-                                                                      maxlen=max_sequence_length)
+    questions_padded = [tf.keras.preprocessing.sequence.pad_sequences(questions_list, maxlen=config['max_sequence_length'])
                         for questions_list in questions_vectorized]
-    answers_vectorized = tf.keras.preprocessing.sequence.pad_sequences(answers_vectorized,
-                                                                       maxlen=max_sequence_length)
+    answers_vectorized = tf.keras.preprocessing.sequence.pad_sequences(answers_vectorized, maxlen=config['max_sequence_length'])
 
-    targets = in_table.target
+    targets = np.expand_dims(in_table.target, -1)
 
     answer_bot = [bot.partition('-')[0] for bot in in_table.answer_bot]
     context_bots = []
@@ -249,19 +248,17 @@ def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
             questions_padded + [answers_vectorized,
                                 q_sentiment,
                                 [sent for sent in in_table.answer_sentiment],
-                                np.expand_dims(in_table.timestamp, -1),
-                                np.expand_dims(bot_overlap_binary, -1)])
+                                np.expand_dims(in_table.timestamp, -1)])
+                                # bot_overlap_binary])
     if not use_sample_weights:
-        return (X,
-                np.expand_dims(targets, -1),
-                np.expand_dims(np.asarray([1.0 for _ in xrange(len(answers_vectorized))]), -1))
+        return X, targets, np.asarray([1.0 for _ in xrange(len(answers_vectorized))])
     default_weight = config['bot_sample_weights']['default']
     X_weight = np.asarray([default_weight for _ in xrange(len(in_table['bot']))])
     for index, bot in enumerate(in_table['bot']):
         for bot_prefix, weight in CONFIG['bot_sample_weights'].iteritems():
             X_weight[index] = weight
             break
-    return X, np.expand_dims(targets, -1), X_weight
+    return X, targets, X_weight
 
 
 def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
