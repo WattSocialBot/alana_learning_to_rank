@@ -31,4 +31,4 @@ For a greater applicability, the models were trained without features involving 
 # Data
 
 Due to the copetition rules, we can't share any data containing real users' interactions with the system.
-Therefore, we only provide snippets of datasets for training and evaluation stages (`pandas json` dataframe format) which you can use as examples for collecting your own data.
+Therefore, we only provide examples of datasets for training and evaluation stages (`pandas json` dataframe format) which you can check with while collecting your own data.
