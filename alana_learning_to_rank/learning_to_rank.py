@@ -1,6 +1,6 @@
 import json
 import random
-from os import path, makedirs
+import os
 import argparse
 
 import numpy as np
@@ -16,8 +16,7 @@ np.random.seed(273)
 tf.set_random_seed(273)
 
 MODEL_FILENAME = 'learning_to_rank.ckpt'
-TF_GRAPH = None
-CONFIG = get_config(path.join(path.dirname(__file__), DEFAULT_CONFIG))
+CONFIG = get_config(os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
 
 
 def flatten(l):
@@ -153,6 +152,38 @@ def train(in_model,
             break
 
 
+def eval_accuracy(in_pred_true, in_pred_fake):
+    accuracy = sum(map(lambda x: 0 < x, in_pred_true - in_pred_fake)) / float(len(in_pred_true))
+    return accuracy[0]
+
+
+def evaluate(model, eval_set, config):
+    gold_qa_pairs = pd.DataFrame({'context': eval_set.context,
+                                  'answer': eval_set.answer,
+                                  'context_ne': eval_set.context_ne,
+                                  'answer_ne': eval_set.answer_ne,
+                                  'context_sentiment': eval_set.context_sentiment,
+                                  'answer_sentiment': eval_set.answer_sentiment,
+                                  'timestamp': eval_set.timestamp,
+                                  'target': eval_set.length_target})
+    fake_qa_pairs = pd.DataFrame({'context': eval_set.context,
+                                  'answer': eval_set.fake_answer,
+                                  'context_ne': eval_set.context_ne,
+                                  'answer_ne': eval_set.fake_answer_ne,
+                                  'context_sentiment': eval_set.context_sentiment,
+                                  'answer_sentiment': eval_set.fake_answer_sentiment,
+                                  'timestamp': eval_set.timestamp,
+                                  'target': eval_set.length_target})
+    X_true, y_true, X_true_w = make_dataset(gold_qa_pairs, rev_vocab, config, use_sample_weights=False)
+    X_fake, y_fake, X_fake_w = make_dataset(fake_qa_pairs, rev_vocab, config, use_sample_weights=False)
+
+    pred_true = predict(model, X_true)
+    pred_fake = predict(model, X_fake)
+
+    accuracy = eval_accuracy(pred_true, pred_fake)
+    print 'Precision@1: {:.3f}'.format(accuracy)
+
+
 def evaluate_loss(in_model,
                   test_data,
                   session,
@@ -180,6 +211,28 @@ def evaluate_loss(in_model,
     return np.mean(batch_losses)
 
 
+def predict(in_model,
+            test_data,
+            session,
+            batch_size=64,
+            **kwargs):
+    X, pred, y = in_model
+    X_test, y_test, X_test_weights, = test_data
+
+    if X_test_weights is None:
+        X_test_weights = np.expand_dims(np.ones(y_test.shape[0]), -1)
+    batch_sample_weight = tf.placeholder(tf.float32, [None, 1])
+
+    batch_gen = batch_generator(X_test, y_test, X_test_weights, batch_size)
+    batch_preds = []
+    for batch_x, batch_y, batch_w in batch_gen:
+        feed_dict = {X_i: batch_x_i for X_i, batch_x_i in zip(X, batch_x)}
+        feed_dict.update({y: batch_y, batch_sample_weight: batch_w})
+        batch_pred = session.run(pred, feed_dict=feed_dict)
+        batch_preds += batch_pred.reshape(-1).tolist()
+    return np.array(batch_preds)
+
+
 def load(in_model_folder, in_session):
     with open(os.path.join(in_model_folder, 'rev_vocab')) as rev_vocab_in:
         rev_vocab = json.load(rev_vocab_in)
@@ -187,15 +240,9 @@ def load(in_model_folder, in_session):
         config = json.load(config_in)
     model = create_model(**config)
     loader = tf.train.Saver()
-    loader.restore(path.join(in_model_folder, MODEL_FILENAME))
+    loader.restore(in_session, os.path.join(in_model_folder, MODEL_FILENAME))
 
     return model, config, rev_vocab
-
-
-def predict(in_model, in_X):
-    global TF_GRAPH
-    with TF_GRAPH.as_default():
-        return in_model.predict(in_X)
 
 
 def save_vocabulary(in_vocabulary, in_file):
@@ -236,12 +283,12 @@ def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
 
     targets = np.expand_dims(in_table.target, -1)
 
-    answer_bot = [bot.partition('-')[0] for bot in in_table.answer_bot]
-    context_bots = []
-    for bot_list in in_table.context_bots:
-        context_bots.append([bot.partition('-')[0] for bot in bot_list])
-    bot_overlap_binary = [int(a_bot in q_bots)
-                          for a_bot, q_bots in zip(answer_bot, context_bots)]
+    # answer_bot = [bot.partition('-')[0] for bot in in_table.answer_bot]
+    # context_bots = []
+    # for bot_list in in_table.context_bots:
+    #     context_bots.append([bot.partition('-')[0] for bot in bot_list])
+    # bot_overlap_binary = [int(a_bot in q_bots)
+    #                       for a_bot, q_bots in zip(answer_bot, context_bots)]
     q_sentiment = [sentiments[-1] for sentiments in in_table.context_sentiment]
 
     X = map(np.asarray,
@@ -251,7 +298,7 @@ def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
                                 np.expand_dims(in_table.timestamp, -1)])
                                 # bot_overlap_binary])
     if not use_sample_weights:
-        return X, targets, np.asarray([1.0 for _ in xrange(len(answers_vectorized))])
+        return X, targets, np.expand_dims(np.ones(len(answers_vectorized)), -1)
     default_weight = config['bot_sample_weights']['default']
     X_weight = np.asarray([default_weight for _ in xrange(len(in_table['bot']))])
     for index, bot in enumerate(in_table['bot']):
@@ -302,7 +349,8 @@ def build_argument_parser():
     result.add_argument('testset')
     result.add_argument('model_folder')
     result.add_argument('--bot_sample_weight', action='store_true')
-    result.add_argument('--config', default=path.join(path.dirname(__file__), DEFAULT_CONFIG))
+    result.add_argument('--config', default=os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
+    result.add_argument('--evaluate', action='store_true', default=False, help='Only evaluate a trained model')
     return result
 
 
@@ -313,34 +361,40 @@ if __name__ == '__main__':
     devset = pd.read_json(args.devset).sample(frac=1).reset_index(drop=True)
     testset = pd.read_json(args.testset).sample(frac=1).reset_index(drop=True)
 
-    CONFIG = get_config(args.config)
-
-    train_data, dev_data, test_data, rev_vocab = make_training_data(trainset,
-                                                                    devset,
-                                                                    testset,
-                                                                    args.bot_sample_weight,
-                                                                    CONFIG)
-    X, y, X_w = train_data
-    X_dev, y_dev, X_dev_w = dev_data
-    X_test, y_test, X_test_w = test_data
-
-    if not path.exists(args.model_folder):
-        makedirs(args.model_folder)
-
-    save_vocabulary(rev_vocab, path.join(args.model_folder, 'rev_vocab'))
-
-    print 'Training with config "{}" :'.format(args.config)
-    print json.dumps(CONFIG, indent=2)
-    model = create_model(**CONFIG)
-    checkpoint_file = path.join(args.model_folder, MODEL_FILENAME)
     with tf.Session() as sess:
-        init = tf.global_variables_initializer()
-        sess.run(init)
-        train(model,
-              (X, y, X_w),
-              (X_dev, y_dev, X_dev_w),
-              (X_test, y_test, X_test_w),
-              checkpoint_file,
-              sess,
-              **CONFIG)
+        if args.evaluate:
+            model, config, _ = load(args.model_folder, sess)
+            evaluate(model, testset, config)
+        else:
+            CONFIG = get_config(args.config)
+
+            train_data, dev_data, test_data, rev_vocab = make_training_data(trainset,
+                                                                            devset,
+                                                                            testset,
+                                                                            args.bot_sample_weight,
+                                                                            CONFIG)
+            X, y, X_w = train_data
+            X_dev, y_dev, X_dev_w = dev_data
+            X_test, y_test, X_test_w = test_data
+
+            if not os.path.exists(args.model_folder):
+                os.makedirs(args.model_folder)
+
+            save_vocabulary(rev_vocab, os.path.join(args.model_folder, 'rev_vocab'))
+            with open(os.path.join(args.model_folder, 'config.json'), 'w') as config_out:
+                json.dump(CONFIG, config_out)
+
+            print 'Training with config "{}" :'.format(args.config)
+            print json.dumps(CONFIG, indent=2)
+            model = create_model(**CONFIG)
+            checkpoint_file = os.path.join(args.model_folder, MODEL_FILENAME)
+            init = tf.global_variables_initializer()
+            sess.run(init)
+            train(model,
+                  (X, y, X_w),
+                  (X_dev, y_dev, X_dev_w),
+                  (X_test, y_test, X_test_w),
+                  checkpoint_file,
+                  sess,
+                  **CONFIG)
 
