@@ -8,4 +8,27 @@ Code for the paper "Neural Response Ranking for Social Conversation: A Data-Effi
 
 ![](neural_ranker_v2.png)
 
-Trained model and example data coming soon.
+# How To
+
+1. Train a new model
+
+```
+python alana_learning_to_rank/learning_to_rank.py <trainset>.json <devset>.json <testset>json <model_folder>
+```
+
+2. Evaluate accuracy of a training model
+
+```
+python alana_learning_to_rank/evaluate.py <model_folder> <eval_dataset>.json
+```
+
+# Trained models
+
+We provide 2 models trained from Alexa Prize dialogue transcripts, `length_model_1M` and `rating_model`, with length and rating targets respectively.
+
+For a greater applicability, the models were trained without features involving bot names (which are specific to our setup), therefore the actual accuracy numbers might differ from reported ones.
+
+# Data
+
+Due to the copetition rules, we can't share any data containing real users' interactions with the system.
+Therefore, we only provide snippets of datasets for training and evaluation stages (`pandas json` dataframe format) which you can use as examples for collecting your own data.
