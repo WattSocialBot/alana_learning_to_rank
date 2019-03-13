@@ -26,6 +26,8 @@ from parlai.core.params import ParlaiParser
 from learning_to_rank_agent import LearningToRankAgent
 from parlai.core.worlds import create_task
 
+from parlai.scripts import build_dict
+
 
 def main():
     # Get command line arguments
@@ -41,7 +43,12 @@ def main():
     parser.add_argument('--history_size', default=10, type=int)
     parser.add_argument('--truncate', default=150, type=int)
     parser.add_argument('--rank_candidates', default=True, type=bool)
+
+    build_dict.setup_args(parser)
     opt = parser.parse_args()
+
+    opt['dict_file'] = os.path.join(opt['model_folder'], 'vocab')
+    dictionary = build_dict.build_dict(opt)
 
     agents = []
     for _ in range(opt['num_agents']):

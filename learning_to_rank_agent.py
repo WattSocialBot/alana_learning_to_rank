@@ -1,10 +1,7 @@
 import random
 import copy
 
-import torch
-from torch import nn
-from torch import optim
-from torch.autograd import Variable
+from alana_learning_to_rank.learning_to_rank import create_model
 
 from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
@@ -14,59 +11,25 @@ class LearningToRankAgent(Agent):
     def __init__(self, opt, shared=None):
         # initialize defaults first
         super().__init__(opt, shared)
+
         if not shared:
             # this is not a shared instance of this class, so do full
             # initialization. if shared is set, only set up shared members.
-
-            self.dict = DictionaryAgent(opt)
-            self.id = 'Seq2Seq'
-            # we use EOS markers to break input and output and end our output
-            self.EOS = self.dict.end_token
+            self.id = 'LearningToRank'
             self.observation = {'text': self.EOS, 'episode_done': True}
-            self.EOS_TENSOR = torch.LongTensor(self.dict.parse(self.EOS))
+            self.dict = DictionaryAgent(opt)
 
-            # store important params directly
-            hsz = opt['hiddensize']
-            self.hidden_size = hsz
-            self.num_layers = opt['numlayers']
-            self.learning_rate = opt['learningrate']
-            self.longest_label = 1
+            self.learning_to_rank_config = {'sentiment_features_number': 0,
+                                            'max_context_turns': 10,
+                                            'max_sequence_length': 60,
+                                            'embedding_size': 256,
+                                            'vocab_size': len(self.dict),
+                                            'rnn_cell': 'GRUCell',
+                                            'bidirectional': False,
+                                            'dropout_prob': 0.3,
+                                            'mlp_sizes': [32]}
 
-            # set up modules
-            self.criterion = nn.NLLLoss()
-            # lookup table stores word embeddings
-            self.lt = nn.Embedding(len(self.dict), hsz, padding_idx=0,
-                                   scale_grad_by_freq=True)
-            # encoder captures the input text
-            self.encoder = nn.GRUCell(hsz, hsz, opt['numlayers'])
-            # decoder produces our output states
-            self.decoder = nn.GRUCell(hsz, hsz, opt['numlayers'])
-            # linear layer helps us produce outputs from final decoder state
-            self.h2o = nn.Linear(hsz, len(self.dict))
-            # droput on the linear layer helps us generalize
-            self.dropout = nn.Dropout(opt['dropout'])
-            # softmax maps output scores to probabilities
-            self.softmax = nn.LogSoftmax()
-
-            self.trainable_vars = [self.lt, self.encoder, self.decoder, self.h2o]
-
-            # set up optims for each module
-            lr = opt['learningrate']
-            self.optims = {
-                'lt': optim.SGD(self.lt.parameters(), lr=lr),
-                'encoder': optim.SGD(self.encoder.parameters(), lr=lr),
-                'decoder': optim.SGD(self.decoder.parameters(), lr=lr),
-                'h2o': optim.SGD(self.h2o.parameters(), lr=lr),
-            }
-
-            # check for cuda
-            self.use_cuda = not opt.get('no_cuda') and torch.cuda.is_available()
-            if self.use_cuda:
-                print('[ Using CUDA ]')
-                torch.cuda.set_device(opt['gpu'])
-            if self.use_cuda:
-                for var in self.trainable_vars:
-                    var.cuda()
+            self.X, self.pred, self.y = create_model(**(self.learning_to_rank_config))
 
         self.episode_done = True
 
