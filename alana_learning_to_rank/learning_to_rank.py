@@ -90,6 +90,53 @@ def create_model(sentiment_features_number,
         return X_context + [X_answer] + X_mlp_inputs, final_pred, y
 
 
+def create_model_personachat(max_context_turns,
+                             max_sequence_length,
+                             embedding_size,
+                             vocab_size,
+                             rnn_cell,
+                             dropout_prob,
+                             mlp_sizes,
+                             answer_candidates_number,
+                             **kwargs):
+    with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
+        X_context = [tf.placeholder(tf.int32,
+                                    [None, max_sequence_length],
+                                    name='X_context_{}'.format(i))
+                     for i in range(max_context_turns)]
+        X_answer = [tf.placeholder(tf.int32,
+                                   [None, max_sequence_length],
+                                   name='X_answer_{}'.format(i))
+                    for i in range(answer_candidates_number)]
+        y = tf.placeholder(tf.float32, [None, answer_candidates_number], name='y')
+
+        embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
+                                 name='emb')
+
+        rnn_cell_class = getattr(tf.nn.rnn_cell, rnn_cell)
+        encoder = rnn_cell_class(embedding_size, name='encoder')
+
+        context_encodings = []
+        for context_turn in X_context:
+            turn_embedding = tf.nn.embedding_lookup(embeddings, context_turn)
+            outputs, _ = tf.nn.dynamic_rnn(encoder, turn_embedding, dtype=tf.float32)
+            context_encodings.append(outputs[:, -1, :])
+        context_encoding = tf.add_n(context_encodings)
+
+        answer_encodings = []
+        for answer in X_answer:
+            answer_embedding = tf.nn.embedding_lookup(embeddings, answer)
+            outputs, _ = tf.nn.dynamic_rnn(encoder, answer_embedding, dtype=tf.float32)
+            answer_encodings.append(outputs[:, -1, :])
+
+        prediction = tf.layers.Dense(mlp_sizes[0])
+        preds = []
+        for answer in answer_encodings:
+            preds.append(prediction(tf.concat([context_encoding, answer], axis=-1)))
+        final_pred = tf.layers.Dense(answer_candidates_number, activation='softmax')
+        return X_context + X_answer, final_pred, y
+
+
 def train(in_model,
           train_data,
           dev_data,

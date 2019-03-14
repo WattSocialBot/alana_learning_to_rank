@@ -26,18 +26,17 @@ class LearningToRankAgent(Agent):
             self.dict = DictionaryAgent(opt)
             self.EOS = self.dict.end_token
             self.observation = {'text': self.EOS, 'episode_done': True}
-            self.learning_to_rank_config = {'sentiment_features_number': 0,
-                                            'max_context_turns': 10,
+            self.learning_to_rank_config = {'max_context_turns': 10,
                                             'max_sequence_length': 60,
                                             'embedding_size': 256,
                                             'vocab_size': len(self.dict),
                                             'rnn_cell': 'GRUCell',
-                                            'bidirectional': False,
                                             'dropout_prob': 0.3,
-                                            'mlp_sizes': [32],
+                                            'mlp_sizes': [16],
                                             'l2_coef': 1e-5,
-                                            'lr': 0.001,
-                                            'optimizer': 'AdamOptimizer'}
+                                            'lr': 0.0001,
+                                            'optimizer': 'AdamOptimizer',
+                                            'answer_candidates_number': 20}
 
             self.X, self.pred, self.y = create_model(**(self.learning_to_rank_config))
         self.episode_done = True
