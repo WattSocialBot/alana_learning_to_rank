@@ -6,7 +6,7 @@ import torch
 import tensorflow as tf
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-from alana_learning_to_rank.learning_to_rank import create_model
+from alana_learning_to_rank.learning_to_rank import create_model_personachat
 from alana_learning_to_rank.util.training_utils import get_loss_function
 
 from parlai.core.agents import Agent
@@ -17,11 +17,11 @@ class LearningToRankAgent(Agent):
     def __init__(self, opt, shared=None):
         # initialize defaults first
         super().__init__(opt, shared)
-        self.sess = tf.Session()
 
         if not shared:
             # this is not a shared instance of this class, so do full
             # initialization. if shared is set, only set up shared members.
+            self.sess = tf.Session()
             self.id = 'LearningToRank'
             self.dict = DictionaryAgent(opt)
             self.EOS = self.dict.end_token
@@ -38,11 +38,41 @@ class LearningToRankAgent(Agent):
                                             'optimizer': 'AdamOptimizer',
                                             'answer_candidates_number': 20}
 
-            self.X, self.pred, self.y = create_model(**(self.learning_to_rank_config))
+            self.X, self.pred, self.y = create_model_personachat(**(self.learning_to_rank_config))
+            self.batch_sample_weight = tf.placeholder(tf.float32, [None, 1], name='sample_weight')
+            # Define loss and optimizer
+            self.loss_op = get_loss_function(self.pred,
+                                             self.y,
+                                             self.batch_sample_weight,
+                                             l2_coef=self.learning_to_rank_config['l2_coef'])
+
+            self.global_step = tf.Variable(0, trainable=False)
+            self.sess.run(tf.assign(self.global_step, 0))
+            self.learning_rate = tf.train.cosine_decay(self.learning_to_rank_config['lr'],
+                                                       self.global_step,
+                                                       2000000,
+                                                       alpha=0.001)
+            optimizer_class = getattr(tf.train, self.learning_to_rank_config['optimizer'])
+            self.optimizer = optimizer_class(learning_rate=self.learning_rate)
+            self.train_op = self.optimizer.minimize(self.loss_op, self.global_step)
+
+            self.saver = tf.train.Saver(tf.global_variables())
+            self.sess.run(tf.global_variables_initializer())
         self.episode_done = True
 
     def batchify(self, observations):
         """Convert a list of observations into input & target tensors."""
+        def valid(obs):
+            # check if this is an example our model should actually process
+            return 'text' in obs and len(obs['text']) > 0
+        # valid examples and their indices
+        try:
+            valid_inds, exs = zip(*[(i, ex) for i, ex in
+                                    enumerate(observations) if valid(ex)])
+        except ValueError:
+            # zero examples to process in this batch, so zip failed to unpack
+            return None, None, None
+
         context_turns = [[] for _ in range(self.learning_to_rank_config['max_context_turns'])]
         answers = [[] for _ in range(len(observations[0]['label_candidates']))]
         y = []
@@ -64,10 +94,13 @@ class LearningToRankAgent(Agent):
                                       value=np.zeros(max_seq_len))[0]
             for j, answer in enumerate(answers_i):
                 answers[j].append(answer)
-            y.append(observation_i['label_candidates'].index(observation_i['labels'][0]))
-        X = list(map(np.array, [context_turns, answers]))
+            label = observation_i['labels'][0] \
+                if 'labels' in observation_i \
+                else observation_i['eval_labels'][0]
+            y.append(observation_i['label_candidates'].index(label))
+        X = list(map(np.array, context_turns + answers))
         y = np.array(y)
-        return X, y
+        return X, y, valid_inds
 
     def predict(self, xs, ys=None):
         """Produce a prediction from our model. Update the model using the
@@ -81,23 +114,9 @@ class LearningToRankAgent(Agent):
             # keep track of longest label we've ever seen
             sample_weights = np.expand_dims(np.ones(ys.shape[0]), -1)
             with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
-                batch_sample_weight = tf.placeholder(tf.float32, [None, 1], name='sample_weight')
-
-                # Define loss and optimizer
-                loss_op = get_loss_function(self.pred, self.y, batch_sample_weight, l2_coef=self.learning_to_rank_config['l2_coef'])
-
-                global_step = tf.Variable(0, trainable=False)
-                self.sess.run(tf.assign(global_step, 0))
-                learning_rate = tf.train.cosine_decay(self.learning_to_rank_config['lr'], global_step, 2000000, alpha=0.001)
-                optimizer_class = getattr(tf.train, self.learning_to_rank_config['optimizer'])
-                optimizer = optimizer_class(learning_rate=learning_rate)
-                train_op = optimizer.minimize(loss_op, global_step)
-
-                saver = tf.train.Saver(tf.global_variables())
-
                 feed_dict = {X_i: batch_x_i for X_i, batch_x_i in zip(self.X, xs)}
-                feed_dict.update({self.y: ys, batch_sample_weight: np.ones((batchsize, 1))})
-                _, train_batch_loss = self.sess.run([train_op, loss_op], feed_dict=feed_dict)
+                feed_dict.update({self.y: ys, self.batch_sample_weight: np.ones((batchsize, 1))})
+                _, train_batch_loss = self.sess.run([self.train_op, self.loss_op], feed_dict=feed_dict)
             return ['I don\'t know'] * batchsize
         else:
             # just produce a prediction without training the model
@@ -169,7 +188,7 @@ class LearningToRankAgent(Agent):
         # valid_inds tells us the indices of all valid examples
         # e.g. for input [{}, {'text': 'hello'}, {}, {}], valid_inds is [1]
         # since the other three elements had no 'text' field
-        xs, ys = self.batchify(observations)
+        xs, ys, valid_inds = self.batchify(observations)
 
         if len(xs) == 0:
             # no valid examples, just return the empty responses we set up

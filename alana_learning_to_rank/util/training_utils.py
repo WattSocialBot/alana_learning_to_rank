@@ -7,11 +7,11 @@ def get_loss_function(in_preds,
                       in_labels,
                       in_sample_weights,
                       l2_coef=0.00):
-    loss_mse = tf.losses.mean_squared_error(in_labels, in_preds, weights=in_sample_weights)
+    loss_xe = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=in_labels, logits=in_preds)
     loss_l2 = tf.reduce_sum([tf.nn.l2_loss(v)
                              for v in tf.trainable_variables()
                              if 'bias' not in v.name]) * l2_coef
-    cost = tf.reduce_mean(tf.add(loss_mse, loss_l2), name='cost')
+    cost = tf.reduce_mean(tf.add(loss_xe, loss_l2), name='cost')
     return cost
 
 
