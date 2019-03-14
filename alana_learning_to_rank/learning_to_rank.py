@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import json
 import random
 import os
@@ -7,9 +9,9 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from config import get_config, DEFAULT_CONFIG
-from data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
-from util.training_utils import get_loss_function, batch_generator
+from .config import get_config, DEFAULT_CONFIG
+from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
+from .util.training_utils import get_loss_function, batch_generator
 
 random.seed(273)
 np.random.seed(273)
@@ -37,7 +39,7 @@ def create_model(sentiment_features_number,
         X_context = [tf.placeholder(tf.int32,
                                     [None, max_sequence_length],
                                     name='X_context_{}'.format(i))
-                     for i in xrange(max_context_turns)]
+                     for i in range(max_context_turns)]
         X_answer = tf.placeholder(tf.int32,
                                   [None, max_sequence_length],
                                   name='X_answer')
@@ -127,7 +129,7 @@ def train(in_model,
 
     epochs_without_improvement = 0
     best_loss, best_loss_step = np.inf, 0
-    for epoch_counter in xrange(epochs):
+    for epoch_counter in range(epochs):
         batch_gen = batch_generator(X_train, y_train, sample_weights, batch_size)
         train_batch_losses = []
         for batch_x, batch_y, batch_w in batch_gen:
@@ -137,18 +139,18 @@ def train(in_model,
                                               feed_dict=feed_dict)
             train_batch_losses.append(train_batch_loss)
         dev_eval_loss = evaluate_loss(in_model, dev_data, session)
-        print 'Epoch {} out of {} results'.format(epoch_counter, epochs)
-        print 'train loss: {:.3f}'.format(np.mean(train_batch_losses))
-        print 'dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(session.run(learning_rate))
+        print('Epoch {} out of {} results'.format(epoch_counter, epochs))
+        print('train loss: {:.3f}'.format(np.mean(train_batch_losses)))
+        print('dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(session.run(learning_rate)))
         if dev_eval_loss < best_loss:
             best_loss = dev_eval_loss
             saver.save(session, in_checkpoint_filepath)
-            print 'New best loss. Saving checkpoint'
+            print('New best loss. Saving checkpoint')
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
         if early_stopping_threshold < epochs_without_improvement:
-            print 'Early stopping after {} epochs'.format(epoch_counter)
+            print('Early stopping after {} epochs'.format(epoch_counter))
             break
 
 
@@ -181,7 +183,7 @@ def evaluate(model, eval_set, config):
     pred_fake = predict(model, X_fake)
 
     accuracy = eval_accuracy(pred_true, pred_fake)
-    print 'Precision@1: {:.3f}'.format(accuracy)
+    print('Precision@1: {:.3f}'.format(accuracy))
 
 
 def evaluate_loss(in_model,
@@ -252,19 +254,17 @@ def save_vocabulary(in_vocabulary, in_file):
 
 def load_vocabulary(in_file):
     with open(in_file) as vocabulary_in:
-        vocab = filter(
-            lambda word: len(word),
-            [word.strip() for word in vocabulary_in]
-        )
+        vocab = list(filter(lambda word: len(word),
+                            [word.strip() for word in vocabulary_in]))
     rev_vocab = {word: index for index, word in enumerate(vocab)}
     return vocab, rev_vocab
 
 
 def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
     # n lists (#context_turns) of lists
-    questions_tokenized = [[] for _ in xrange(config['max_context_turns'])]
+    questions_tokenized = [[] for _ in range(config['max_context_turns'])]
     for context_turns, context_nes in zip(in_table.context, in_table.context_ne):
-        context_turns_padded = ['' for _ in xrange((config['max_context_turns'] - len(context_turns)))] + context_turns
+        context_turns_padded = ['' for _ in range((config['max_context_turns'] - len(context_turns)))] + context_turns
         for turn_idx, (turn, turn_nes) in enumerate(zip(context_turns_padded, context_nes)):
             questions_tokenized[turn_idx].append(tokenize_utterance(turn,
                                                                     remove_stopwords=False,
@@ -291,16 +291,16 @@ def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
     #                       for a_bot, q_bots in zip(answer_bot, context_bots)]
     q_sentiment = [sentiments[-1] for sentiments in in_table.context_sentiment]
 
-    X = map(np.asarray,
-            questions_padded + [answers_vectorized,
-                                q_sentiment,
-                                [sent for sent in in_table.answer_sentiment],
-                                np.expand_dims(in_table.timestamp, -1)])
-                                # bot_overlap_binary])
+    X = list(map(np.asarray,
+                 questions_padded + [answers_vectorized,
+                                     q_sentiment,
+                                     [sent for sent in in_table.answer_sentiment],
+                                     np.expand_dims(in_table.timestamp, -1)]))
+                                     # bot_overlap_binary])
     if not use_sample_weights:
         return X, targets, np.expand_dims(np.ones(len(answers_vectorized)), -1)
     default_weight = config['bot_sample_weights']['default']
-    X_weight = np.asarray([default_weight for _ in xrange(len(in_table['bot']))])
+    X_weight = np.asarray([default_weight for _ in range(len(in_table['bot']))])
     for index, bot in enumerate(in_table['bot']):
         for bot_prefix, weight in CONFIG['bot_sample_weights'].iteritems():
             X_weight[index] = weight
@@ -313,7 +313,8 @@ def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
     for context_utterances in in_train.context:
         utterances_tokenized += [tokenize_utterance(utt, add_special_symbols=False, remove_stopwords=False)
                                  for utt in context_utterances]
-    utterances_tokenized += map(lambda x: tokenize_utterance(x, add_special_symbols=False, remove_stopwords=False), in_train.answer)
+    utterances_tokenized += list(map(lambda x: tokenize_utterance(x, add_special_symbols=False, remove_stopwords=False),
+                                     in_train.answer))
 
     context_nes = []
     for ne_list in in_train.context_ne:
@@ -384,8 +385,8 @@ if __name__ == '__main__':
             with open(os.path.join(args.model_folder, 'config.json'), 'w') as config_out:
                 json.dump(CONFIG, config_out)
 
-            print 'Training with config "{}" :'.format(args.config)
-            print json.dumps(CONFIG, indent=2)
+            print('Training with config "{}" :'.format(args.config))
+            print(json.dumps(CONFIG, indent=2))
             model = create_model(**CONFIG)
             checkpoint_file = os.path.join(args.model_folder, MODEL_FILENAME)
             init = tf.global_variables_initializer()

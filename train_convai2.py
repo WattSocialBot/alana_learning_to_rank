@@ -43,6 +43,7 @@ def main():
     parser.add_argument('--history_size', default=10, type=int)
     parser.add_argument('--truncate', default=150, type=int)
     parser.add_argument('--rank_candidates', default=True, type=bool)
+    parser.add_argument('--model_folder', default='learning_to_rank_model', type=str)
 
     build_dict.setup_args(parser)
     opt = parser.parse_args()
@@ -82,3 +83,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

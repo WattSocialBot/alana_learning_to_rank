@@ -5,6 +5,7 @@ import time
 import numpy as np
 import nltk
 
+nltk.download('stopwords')
 STOP_LIST = nltk.corpus.stopwords.words('english')
 
 
