@@ -160,12 +160,10 @@ def train(in_model,
           session,
           epochs=CONFIG['epochs'],
           batch_size=CONFIG['batch_size'],
+          eval_batches=CONFIG['eval_batches'],
           sample_weights=None,
-          lr=0.001,
           l2_coef=0.0,
-          lr_decay=1.0,
-          early_stopping_threshold=100,
-          optimizer='GradientDescentOptimizer',
+          early_stopping_threshold=20,
           **kwargs):
     X, pred, y = in_model
     X_train, y_train, X_weights = train_data
@@ -184,24 +182,27 @@ def train(in_model,
     init = tf.global_variables_initializer()
     session.run(init)
 
-
     saver = tf.train.Saver(tf.global_variables())
 
-    epochs_without_improvement = 0
+    epoch_counter, epochs_without_improvement = 0, 0
     best_loss, best_loss_step = np.inf, 0
-    for epoch_counter in range(epochs):
-        batch_gen = batch_generator(X_train, y_train, sample_weights, batch_size)
+    batch_gen = batch_generator(X_train, y_train, sample_weights, batch_size, rotate=True)
+
+    while epoch_counter < epochs:
         train_batch_losses = []
-        for batch_x, batch_y, batch_w in batch_gen:
+        for batch_idx, (batch_x, batch_y, batch_w) in enumerate(batch_gen):
             feed_dict = {X_i: batch_x_i for X_i, batch_x_i in zip(X, batch_x)}
             feed_dict.update({y: batch_y, batch_sample_weight: batch_w})
             _, train_batch_loss = session.run([train_op, loss_op],
                                               feed_dict=feed_dict)
             train_batch_losses.append(train_batch_loss)
+            if batch_idx == eval_batches - 1:
+                break
         dev_eval_loss = evaluate_loss(in_model, dev_data, session)
         print('Epoch {} out of {} results'.format(epoch_counter, epochs))
         print('train loss: {:.3f}'.format(np.mean(train_batch_losses)))
         print('dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(optimizer._lr.eval()))
+        epoch_counter += 1
         if dev_eval_loss < best_loss:
             best_loss = dev_eval_loss
             saver.save(session, in_checkpoint_filepath)

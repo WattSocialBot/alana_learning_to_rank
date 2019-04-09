@@ -16,18 +16,20 @@ def get_loss_function(in_preds,
     return cost
 
 
-def batch_generator(X, y, sample_weights, batch_size):
+def batch_generator(X, y, sample_weights, batch_size, rotate=False):
     batch_start_idx = 0
     total_batches_number = y.shape[0] // batch_size
     batch_counter = 0
-    while batch_start_idx < y.shape[0]:
+    loop_pred = True if rotate else batch_start_idx < y.shape[0]
+    while loop_pred:
         if batch_counter % 100 == 0:
             print('\rProcessed {} out of {} batches'.format(batch_counter, total_batches_number), end='')
         batch = ([X_i[batch_start_idx: batch_start_idx + batch_size] for X_i in X],
                  y[batch_start_idx: batch_start_idx + batch_size],
                  sample_weights[batch_start_idx: batch_start_idx + batch_size])
         batch_start_idx += batch_size
+        if rotate:
+            batch_start_idx %= y.shape[0]
         batch_counter += 1
         yield batch
     print('\n')
-

@@ -94,16 +94,14 @@ def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
             rev_word_vocab)
 
 
-def evaluate(model, eval_set, config):
+def evaluate_personachat(model, eval_set, config):
+    X_true, y_true, X_true_w = make_dataset(eval_set, rev_vocab, config, use_sample_weights=False)
 
-    X_true, y_true, X_true_w = make_dataset(gold_qa_pairs, rev_vocab, config, use_sample_weights=False)
-    X_fake, y_fake, X_fake_w = make_dataset(fake_qa_pairs, rev_vocab, config, use_sample_weights=False)
+    pred = predict(model, X_true)
+    pred = pred.reshape((None, 20))
 
-    pred_true = predict(model, X_true)
-    pred_fake = predict(model, X_fake)
-
-    accuracy = eval_accuracy(pred_true, pred_fake)
-    print('Precision@1: {:.3f}'.format(accuracy))
+    hits_at_1, f1 = compute_hits(pred, pred), compute_f1(pred, pred)
+    print('Hits@1: {:.3f} F1: {:.3f}'.format(hits_at_1, f1))
 
 
 def build_argument_parser():
@@ -114,7 +112,8 @@ def build_argument_parser():
     result.add_argument('model_folder')
     result.add_argument('--bot_sample_weight', action='store_true')
     result.add_argument('--config', default=os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
-    result.add_argument('--evaluate', action='store_true', default=False, help='Only evaluate a trained model')
+    result.add_argument('--evaluate', action='store_true', default=False)
+    result.add_argument('--candidates_number', default=20, type=int)
     return result
 
 
@@ -122,13 +121,13 @@ if __name__ == '__main__':
     parser = build_argument_parser()
     args = parser.parse_args()
     trainset = pd.read_json(args.trainset).sample(frac=1).reset_index(drop=True)
-    devset = pd.read_json(args.devset).sample(frac=1).reset_index(drop=True)
-    testset = pd.read_json(args.testset).sample(frac=1).reset_index(drop=True)
+    devset = pd.read_json(args.devset)
+    testset = pd.read_json(args.testset)
 
     with tf.Session() as sess:
         if args.evaluate:
             model, config, _ = load(args.model_folder, sess)
-            evaluate(model, testset, config)
+            evaluate_personachat(model, testset, config)
         else:
             CONFIG = get_config(args.config)
 
