@@ -25,6 +25,15 @@ def flatten(l):
     return [item for sublist in l for item in sublist]
 
 
+def get_optimizer(in_sess, lr, optimizer, **kwargs):
+    global_step = tf.Variable(0, trainable=False)
+    in_sess.run(tf.assign(global_step, 0))
+    learning_rate = tf.train.cosine_decay(lr, global_step, 2000000, alpha=0.001)
+    optimizer_class = getattr(tf.train, optimizer)
+    optimizer = optimizer_class(learning_rate=learning_rate)
+    return optimizer, global_step 
+
+
 def create_model(sentiment_features_number,
                  max_context_turns,
                  max_sequence_length,
@@ -90,25 +99,31 @@ def create_model(sentiment_features_number,
         return X_context + [X_answer] + X_mlp_inputs, final_pred, y
 
 
-def create_model_personachat(max_context_turns,
+def create_model_personachat(sentiment_features_number,
+                             max_context_turns,
                              max_sequence_length,
                              embedding_size,
                              vocab_size,
                              rnn_cell,
                              dropout_prob,
                              mlp_sizes,
-                             answer_candidates_number,
                              **kwargs):
     with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
         X_context = [tf.placeholder(tf.int32,
                                     [None, max_sequence_length],
                                     name='X_context_{}'.format(i))
                      for i in range(max_context_turns)]
-        X_answer = [tf.placeholder(tf.int32,
-                                   [None, max_sequence_length],
-                                   name='X_answer_{}'.format(i))
-                    for i in range(answer_candidates_number)]
-        y = tf.placeholder(tf.int32, [None], name='y')
+        X_answer = tf.placeholder(tf.int32,
+                                  [None, max_sequence_length],
+                                  name='X_answer')
+        X_question_sentiment = tf.placeholder(tf.float32,
+                                              [None, sentiment_features_number],
+                                              name='X_context_sentiment')
+        X_answer_sentiment = tf.placeholder(tf.float32,
+                                            [None, sentiment_features_number],
+                                            name='X_answer_sentiment')
+        X_mlp_inputs = [X_question_sentiment, X_answer_sentiment]
+        y = tf.placeholder(tf.float32, [None, 1], name='y')
 
         embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
                                  name='emb')
@@ -123,25 +138,23 @@ def create_model_personachat(max_context_turns,
             context_encodings.append(outputs)
         context_encoding = tf.add_n(context_encodings)
 
-        answer_encodings = []
-        for answer in X_answer:
-            answer_embedding = tf.nn.embedding_lookup(embeddings, answer)
-            outputs = encoder(answer_embedding)
-            answer_encodings.append(outputs)
+        answer_embedding = tf.nn.embedding_lookup(embeddings, X_answer)
+        answer_encoding = encoder(answer_embedding)
 
-        prediction = tf.layers.Dense(mlp_sizes[0])
-        preds = []
-        for answer in answer_encodings:
-            preds.append(prediction(tf.concat([context_encoding, answer], axis=-1)))
-        final_ranking = tf.layers.Dense(answer_candidates_number, activation='softmax')
-        final_pred = final_ranking(tf.concat(preds, axis=-1))
-        return X_context + X_answer, final_pred, y
+        mlp = tf.layers.Dense(mlp_sizes[0])
+        context_answer = mlp(tf.concat([context_encoding, answer_encoding], axis=-1))
+        all_mlp_input = tf.concat([context_answer] + X_mlp_inputs, -1)
+        final_ranking = tf.layers.Dense(1, activation='sigmoid')(all_mlp_input)
+        return (X_context + [X_answer, X_question_sentiment, X_answer_sentiment],
+                final_ranking,
+                y)
 
 
 def train(in_model,
           train_data,
           dev_data,
           test_data,
+          in_opt,
           in_checkpoint_filepath,
           session,
           epochs=CONFIG['epochs'],
@@ -158,6 +171,7 @@ def train(in_model,
     X_dev, y_dev, X_dev_weights = dev_data
     X_test, y_test, X_test_weights, = test_data
 
+    optimizer, global_step = in_opt
     if sample_weights is None:
         sample_weights = np.expand_dims(np.ones(y_train.shape[0]), -1)
     with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
@@ -165,13 +179,10 @@ def train(in_model,
 
     # Define loss and optimizer
     loss_op = get_loss_function(pred, y, batch_sample_weight, l2_coef=l2_coef)
-
-    global_step = tf.Variable(0, trainable=False)
-    session.run(tf.assign(global_step, 0))
-    learning_rate = tf.train.cosine_decay(lr, global_step, 2000000, alpha=0.001)
-    optimizer_class = getattr(tf.train, optimizer)
-    optimizer = optimizer_class(learning_rate=learning_rate)
     train_op = optimizer.minimize(loss_op, global_step)
+    init = tf.global_variables_initializer()
+    session.run(init)
+
 
     saver = tf.train.Saver(tf.global_variables())
 
@@ -189,7 +200,7 @@ def train(in_model,
         dev_eval_loss = evaluate_loss(in_model, dev_data, session)
         print('Epoch {} out of {} results'.format(epoch_counter, epochs))
         print('train loss: {:.3f}'.format(np.mean(train_batch_losses)))
-        print('dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(session.run(learning_rate)))
+        print('dev loss: {:.3f}'.format(dev_eval_loss) + ' @lr={}'.format(optimizer._lr.eval()))
         if dev_eval_loss < best_loss:
             best_loss = dev_eval_loss
             saver.save(session, in_checkpoint_filepath)
@@ -200,6 +211,35 @@ def train(in_model,
         if early_stopping_threshold < epochs_without_improvement:
             print('Early stopping after {} epochs'.format(epoch_counter))
             break
+
+
+def compute_hits(in_true, in_pred):
+    hits = []
+    for true, pred_list in zip(in_true, in_pred):
+        hits.append(int(true == pred_list[0]))
+    return np.mean(hits)
+
+
+def get_prec_recall(tp, fp, fn):
+    precision = tp / (tp + fp + 10e-20)
+    recall = tp / (tp + fn + 10e-20)
+    f1 = 2 * precision * recall / (precision + recall + 1e-20)
+    return precision, recall, f1
+
+
+def get_tp_fp_fn(label_list, pred_list):
+    tp = len([t for t in pred_list if t in label_list])
+    fp = max(0, len(pred_list) - tp)
+    fn = max(0, len(label_list) - tp)
+    return tp, fp, fn
+
+
+def compute_f1(in_true, in_pred):
+    f1s = []
+    for true, pred_list in zip(in_true, in_pred):
+        _, _, f1 = get_prec_recall(get_tp_fp_fn(true, pred_list[0]))
+        f1s.append(f1)
+    return np.mean(f1s)
 
 
 def eval_accuracy(in_pred_true, in_pred_fake):

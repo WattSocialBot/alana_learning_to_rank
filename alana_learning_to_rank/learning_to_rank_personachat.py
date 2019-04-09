@@ -10,13 +10,14 @@ import pandas as pd
 import tensorflow as tf
 
 from .config import get_config, DEFAULT_CONFIG
-from .data_utils import build_vocabulary, tokenize_utterance
+from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
 from .learning_to_rank import (make_dataset,
                                load,
                                save_vocabulary,
                                create_model_personachat,
                                train,
-                               evaluate)
+                               evaluate,
+                               get_optimizer)
 
 random.seed(273)
 np.random.seed(273)
@@ -26,39 +27,70 @@ MODEL_FILENAME = 'learning_to_rank.ckpt'
 CONFIG = get_config(os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
 
 
+def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
+    # n lists (#context_turns) of lists
+    questions_tokenized = [[] for _ in range(config['max_context_turns'])]
+    for persona_turns, context_turns in zip(in_table.persona, in_table.context):
+        all_turns = (persona_turns + context_turns)[:config['max_context_turns']]
+        context_turns_padded = ['' for _ in range((config['max_context_turns'] - len(all_turns) ))] + all_turns
+        for turn_idx, turn in enumerate(context_turns_padded):
+            questions_tokenized[turn_idx].append(tokenize_utterance(turn,
+                                                                    remove_stopwords=False,
+                                                                    add_special_symbols=False))
+    responses_tokenized = []
+    for response in in_table.response:
+        responses_tokenized.append(tokenize_utterance(response, remove_stopwords=False, add_special_symbols=False))
+
+    questions_vectorized = []
+    for turns_list in questions_tokenized:
+        questions_vectorized.append(vectorize_sequences(turns_list, in_rev_vocab))
+    responses_vectorized = vectorize_sequences(responses_tokenized, in_rev_vocab)
+    questions_padded = [tf.keras.preprocessing.sequence.pad_sequences(questions_list, maxlen=config['max_sequence_length'])
+                        for questions_list in questions_vectorized]
+    responses_vectorized = tf.keras.preprocessing.sequence.pad_sequences(responses_vectorized, maxlen=config['max_sequence_length'])
+
+    targets = np.expand_dims(in_table.target, -1)
+
+    X = list(map(np.asarray,
+                 questions_padded + [responses_vectorized,
+                                     [sent for sent in in_table.c_sentiment],
+                                     [sent for sent in in_table.a_sentiment]]))
+    if not use_sample_weights:
+        return X, targets, np.expand_dims(np.ones(len(responses_vectorized)), -1)
+    default_weight = config['bot_sample_weights']['default']
+    X_weight = np.asarray([default_weight for _ in range(len(in_table['bot']))])
+    for index, bot in enumerate(in_table['bot']):
+        for bot_prefix, weight in CONFIG['bot_sample_weights'].iteritems():
+            X_weight[index] = weight
+            break
+    return X, targets, X_weight
+
+
 def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
     utterances_tokenized = []
     for context_utterances in in_train.context:
         utterances_tokenized += [tokenize_utterance(utt, add_special_symbols=False, remove_stopwords=False)
                                  for utt in context_utterances]
     utterances_tokenized += list(map(lambda x: tokenize_utterance(x, add_special_symbols=False, remove_stopwords=False),
-                                     in_train.answer))
+                                     in_train.response))
 
-    context_nes = []
-    for ne_list in in_train.context_ne:
-        context_nes += ne_list
-    word_vocab, rev_word_vocab = build_vocabulary(in_train.context.values.tolist() + in_train.answer.values.tolist(),
-                                                  max_size=in_config['max_vocab_size'] - in_config['max_ne_vocab_size'])
-    ne_vocab, ne_rev_vocab = build_vocabulary(context_nes + in_train.answer_ne.values.tolist(),
-                                              max_size=in_config['max_ne_vocab_size'],
-                                              add_special_symbols=False)
-    unified_vocab = list(set(word_vocab + ne_vocab))
-    unified_rev_vocab = {word: index for index, word in enumerate(unified_vocab)}
+    word_vocab, rev_word_vocab = build_vocabulary(in_train.context.values.tolist() + in_train.response.values.tolist(),
+                                                  max_size=in_config['max_vocab_size'])
 
-    in_config['vocab_size'] = len(unified_rev_vocab)
-    X, y, X_weight = make_dataset(in_train, unified_rev_vocab, in_config, use_sample_weights=in_sample_weight)
+    in_config['vocab_size'] = len(rev_word_vocab)
+    X, y, X_weight = make_dataset(in_train, rev_word_vocab, in_config, use_sample_weights=in_sample_weight)
     X_dev, y_dev, X_dev_weight = make_dataset(in_dev,
-                                              unified_rev_vocab,
+                                              rev_word_vocab,
                                               in_config,
                                               use_sample_weights=in_sample_weight)
     X_test, y_test, X_test_weight = make_dataset(in_test,
-                                                 unified_rev_vocab,
+                                                 rev_word_vocab,
                                                  in_config,
                                                  use_sample_weights=in_sample_weight)
     return ((X, y, X_weight),
             (X_dev, y_dev, X_dev_weight),
             (X_test, y_test, X_test_weight),
-            unified_rev_vocab)
+            rev_word_vocab)
 
 
 def build_argument_parser():
@@ -103,16 +135,17 @@ if __name__ == '__main__':
             with open(os.path.join(args.model_folder, 'config.json'), 'w') as config_out:
                 json.dump(CONFIG, config_out)
 
+            opt = get_optimizer(sess, **CONFIG)
             print('Training with config "{}" :'.format(args.config))
             print(json.dumps(CONFIG, indent=2))
             model = create_model_personachat(**CONFIG)
             checkpoint_file = os.path.join(args.model_folder, MODEL_FILENAME)
-            init = tf.global_variables_initializer()
-            sess.run(init)
             train(model,
                   (X, y, X_w),
                   (X_dev, y_dev, X_dev_w),
                   (X_test, y_test, X_test_w),
+                  opt,
                   checkpoint_file,
                   sess,
                   **CONFIG)
+

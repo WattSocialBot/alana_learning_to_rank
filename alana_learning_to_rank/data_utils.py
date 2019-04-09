@@ -12,7 +12,7 @@ STOP_LIST = nltk.corpus.stopwords.words('english')
 def tokenize_utterance(in_utterance, add_special_symbols=True, remove_stopwords=True):
     utterance_tokenized = nltk.RegexpTokenizer('\w+').tokenize(in_utterance.lower())
     if remove_stopwords:
-        utterance_tokenized = filter(lambda token: token not in STOP_LIST, utterance_tokenized)
+        utterance_tokenized = list(filter(lambda token: token not in STOP_LIST, utterance_tokenized))
     if add_special_symbols:
         utterance_tokenized = ['^'] + utterance_tokenized + ['$']
     return utterance_tokenized
@@ -24,7 +24,7 @@ def build_vocabulary(in_sequences, max_size=10000, max_ngram_length=1, add_speci
     for seq in in_sequences:
         ngram_windows = [
             deque([], maxlen=length)
-            for length in xrange(1, max_ngram_length + 1)
+            for length in range(1, max_ngram_length + 1)
         ]
         for token in seq:
             for ngram_window in ngram_windows:
@@ -34,7 +34,7 @@ def build_vocabulary(in_sequences, max_size=10000, max_ngram_length=1, add_speci
     if add_special_symbols:
         vocabulary['_PAD'] = 999999999  # hack
         vocabulary['_UNK'] = 999999998  # hack
-    vocab = map(itemgetter(0), sorted(vocabulary.items(), key=itemgetter(1), reverse=True))[:max_size]
+    vocab = list(map(itemgetter(0), sorted(vocabulary.items(), key=itemgetter(1), reverse=True)))[:max_size]
     rev_vocab = {word: index for index, word in enumerate(vocab)}
     return vocab, rev_vocab
 
