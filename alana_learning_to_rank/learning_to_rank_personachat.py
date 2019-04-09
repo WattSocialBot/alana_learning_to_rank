@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
+from .util.eval_utils import compute_f1, compute_hits
 from .config import get_config, DEFAULT_CONFIG
 from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
 from .learning_to_rank import (make_dataset,
@@ -16,7 +17,7 @@ from .learning_to_rank import (make_dataset,
                                save_vocabulary,
                                create_model_personachat,
                                train,
-                               evaluate,
+                               predict,
                                get_optimizer)
 
 random.seed(273)
@@ -91,6 +92,18 @@ def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
             (X_dev, y_dev, X_dev_weight),
             (X_test, y_test, X_test_weight),
             rev_word_vocab)
+
+
+def evaluate(model, eval_set, config):
+
+    X_true, y_true, X_true_w = make_dataset(gold_qa_pairs, rev_vocab, config, use_sample_weights=False)
+    X_fake, y_fake, X_fake_w = make_dataset(fake_qa_pairs, rev_vocab, config, use_sample_weights=False)
+
+    pred_true = predict(model, X_true)
+    pred_fake = predict(model, X_fake)
+
+    accuracy = eval_accuracy(pred_true, pred_fake)
+    print('Precision@1: {:.3f}'.format(accuracy))
 
 
 def build_argument_parser():

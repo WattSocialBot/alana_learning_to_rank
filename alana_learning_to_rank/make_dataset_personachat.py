@@ -1,5 +1,5 @@
 import json
-import sys
+
 from collections import deque
 import os
 import argparse
@@ -8,18 +8,18 @@ from operator import itemgetter
 
 import pandas as pd
 import numpy as np
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import nltk
 
 from .config import get_config, DEFAULT_CONFIG
 
 random.seed(273)
 np.random.seed(273)
 
-CONFIG = get_config(os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
-SENT = SentimentIntensityAnalyzer()
-
-import nltk
 nltk.download('vader_lexicon')
+
+CONFIG = get_config(os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
+SENT = nltk.sentiment.vader.SentimentIntensityAnalyzer()
+
 
 def get_sentiment(in_utterance):
     sentiment_dict = SENT.polarity_scores(in_utterance)
@@ -27,9 +27,7 @@ def get_sentiment(in_utterance):
     return sentiment
 
 
-def process_dataset(in_json):
-    sentiment_analyzer = SentimentIntensityAnalyzer()
-
+def process_dataset(in_json, fake_responses_number, randomize_fake_responses):
     context, response, persona, target, c_sentiment, a_sentiment = [], [], [], [], [], []
     for dialog in in_json:
         context_queue = deque(maxlen=CONFIG['max_context_turns'])
@@ -44,13 +42,18 @@ def process_dataset(in_json):
                 target.append(1.0)
                 c_sentiment.append(last_sentiment)
                 a_sentiment.append(sentiment)
-                fake_response = random.choice(turn['response_cands'][:-1])
-                context.append(list(context_queue))
-                response.append(fake_response)
-                persona.append(current_persona)
-                target.append(0.0)
-                c_sentiment.append(last_sentiment)
-                a_sentiment.append(get_sentiment(fake_response))
+                fake_responses =  np.random.choice(turn['response_cands'][:-1],
+                                                   fake_responses_number,
+                                                   replace=False) \
+                    if randomize_fake_responses \
+                    else turn['response_cands'][:min(fake_responses_number, 19)]
+                for fake_response in fake_responses:
+                    context.append(list(context_queue))
+                    response.append(fake_response)
+                    persona.append(current_persona)
+                    target.append(0.0)
+                    c_sentiment.append(last_sentiment)
+                    a_sentiment.append(get_sentiment(fake_response))
             context_queue.append(turn['utterance'])
             last_sentiment = sentiment
     return pd.DataFrame({'context': context,
@@ -65,6 +68,8 @@ def build_argument_parser():
     result = argparse.ArgumentParser()
     result.add_argument('dataset_file')
     result.add_argument('output_file')
+    result.add_argument('--fake_responses_number', default=1, type=int)
+    result.add_argument('--randomize_fake_responses', action='store_true')
     result.add_argument('--config', default=os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
     return result
 
@@ -76,6 +81,6 @@ if __name__ == '__main__':
 
     with open(args.dataset_file) as f_in:
         dataset_json = json.load(f_in)
-    pd_dataset = process_dataset(dataset_json)
+    pd_dataset = process_dataset(dataset_json, args.fake_responses_number, args.randomzie_fake_responses)
     pd_dataset.to_json(args.output_file)
 
