@@ -25,7 +25,7 @@ def get_tp_fp_fn(label_list, pred_list):
 def compute_f1(in_true, in_pred):
     f1s = []
     for true, pred_list in zip(in_true, in_pred):
-        _, _, f1 = get_prec_recall(get_tp_fp_fn(true, pred_list[0]))
+        _, _, f1 = get_prec_recall(*(get_tp_fp_fn(true.split(), pred_list[0].split())))
         f1s.append(f1)
     return np.mean(f1s)
 

@@ -4,6 +4,7 @@ import json
 import random
 import os
 import argparse
+import copy
 
 import numpy as np
 import pandas as pd
@@ -13,7 +14,6 @@ from .util.eval_utils import compute_f1, compute_hits
 from .config import get_config, DEFAULT_CONFIG
 from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequences
 from .learning_to_rank import (make_dataset,
-                               load,
                                save_vocabulary,
                                create_model_personachat,
                                train,
@@ -50,7 +50,7 @@ def make_dataset(in_table, in_rev_vocab, config, use_sample_weights=True):
                         for questions_list in questions_vectorized]
     responses_vectorized = tf.keras.preprocessing.sequence.pad_sequences(responses_vectorized, maxlen=config['max_sequence_length'])
 
-    targets = np.expand_dims(in_table.target, -1)
+    targets = in_table.target
 
     X = list(map(np.asarray,
                  questions_padded + [responses_vectorized,
@@ -94,14 +94,36 @@ def make_training_data(in_train, in_dev, in_test, in_sample_weight, in_config):
             rev_word_vocab)
 
 
-def evaluate_personachat(model, eval_set, config):
-    X_true, y_true, X_true_w = make_dataset(eval_set, rev_vocab, config, use_sample_weights=False)
+def evaluate_personachat(model, config, rev_vocab, eval_set, session):
+    X, y, X_w = make_dataset(eval_set, rev_vocab, config, use_sample_weights=False)
+    responses = eval_set.response.as_matrix().reshape((-1, 20))
+    gold_responses = [response_cands[0] for response_cands in responses]
 
-    pred = predict(model, X_true)
-    pred = pred.reshape((None, 20))
+    preds = predict(model, (X, y, X_w), session, **config)
+    preds = preds.reshape((-1, 20))
+    assert responses.shape == preds.shape
 
-    hits_at_1, f1 = compute_hits(pred, pred), compute_f1(pred, pred)
+    predicted = []
+    for response_cands, preds_i in zip(responses, preds):
+        cands_i = copy.deepcopy(response_cands)
+        cand_argmax = np.argmax(preds_i, axis=-1)
+        cands_i[0], cands_i[cand_argmax] = cands_i[cand_argmax], cands_i[0]
+        predicted.append(cands_i)
+
+    hits_at_1, f1 = compute_hits(gold_responses, predicted), compute_f1(gold_responses, predicted)
     print('Hits@1: {:.3f} F1: {:.3f}'.format(hits_at_1, f1))
+
+
+def load(in_model_folder, in_session):
+    with open(os.path.join(in_model_folder, 'rev_vocab')) as rev_vocab_in:
+        rev_vocab = json.load(rev_vocab_in)
+    with open(os.path.join(in_model_folder, 'config.json')) as config_in:
+        config = json.load(config_in)
+    model = create_model_personachat(**config)
+    loader = tf.train.Saver()
+    loader.restore(in_session, os.path.join(in_model_folder, MODEL_FILENAME))
+
+    return model, config, rev_vocab
 
 
 def build_argument_parser():
@@ -126,8 +148,8 @@ if __name__ == '__main__':
 
     with tf.Session() as sess:
         if args.evaluate:
-            model, config, _ = load(args.model_folder, sess)
-            evaluate_personachat(model, testset, config)
+            model, config, rev_vocab = load(args.model_folder, sess)
+            evaluate_personachat(model, config, rev_vocab, testset, sess)
         else:
             CONFIG = get_config(args.config)
 
@@ -160,4 +182,5 @@ if __name__ == '__main__':
                   checkpoint_file,
                   sess,
                   **CONFIG)
+            evaluate_personachat(model, testset, CONFIG)
 

@@ -9,7 +9,7 @@ from operator import itemgetter
 import pandas as pd
 import numpy as np
 import nltk
-
+from nltk import sentiment
 from .config import get_config, DEFAULT_CONFIG
 
 random.seed(273)
@@ -18,7 +18,7 @@ np.random.seed(273)
 nltk.download('vader_lexicon')
 
 CONFIG = get_config(os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
-SENT = nltk.sentiment.vader.SentimentIntensityAnalyzer()
+SENT = sentiment.vader.SentimentIntensityAnalyzer()
 
 
 def get_sentiment(in_utterance):
@@ -42,9 +42,8 @@ def process_dataset(in_json, fake_responses_number, randomize_fake_responses):
                 target.append(1.0)
                 c_sentiment.append(last_sentiment)
                 a_sentiment.append(sentiment)
-                fake_responses =  np.random.choice(turn['response_cands'][:-1],
-                                                   fake_responses_number,
-                                                   replace=False) \
+                fake_responses = \
+                    np.random.choice(turn['response_cands'][:-1], fake_responses_number, replace=False) \
                     if randomize_fake_responses \
                     else turn['response_cands'][:min(fake_responses_number, 19)]
                 for fake_response in fake_responses:
@@ -56,6 +55,7 @@ def process_dataset(in_json, fake_responses_number, randomize_fake_responses):
                     a_sentiment.append(get_sentiment(fake_response))
             context_queue.append(turn['utterance'])
             last_sentiment = sentiment
+    assert len(response) % (fake_responses_number + 1) == 0
     return pd.DataFrame({'context': context,
                          'response': response,
                          'persona': persona,
@@ -81,6 +81,6 @@ if __name__ == '__main__':
 
     with open(args.dataset_file) as f_in:
         dataset_json = json.load(f_in)
-    pd_dataset = process_dataset(dataset_json, args.fake_responses_number, args.randomzie_fake_responses)
+    pd_dataset = process_dataset(dataset_json, args.fake_responses_number, args.randomize_fake_responses)
     pd_dataset.to_json(args.output_file)
 

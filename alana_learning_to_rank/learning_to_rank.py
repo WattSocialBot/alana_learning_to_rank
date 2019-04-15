@@ -108,6 +108,7 @@ def create_model_personachat(sentiment_features_number,
                              rnn_cell,
                              dropout_prob,
                              mlp_sizes,
+                             bidirectional,
                              **kwargs):
     with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
         X_context = [tf.placeholder(tf.int32,
@@ -124,13 +125,15 @@ def create_model_personachat(sentiment_features_number,
                                             [None, sentiment_features_number],
                                             name='X_answer_sentiment')
         X_mlp_inputs = [X_question_sentiment, X_answer_sentiment]
-        y = tf.placeholder(tf.float32, [None, 1], name='y')
+        y = tf.placeholder(tf.int32, [None], name='y')
 
         embeddings = tf.Variable(tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
                                  name='emb')
 
         rnn_cell_class = getattr(tf.keras.layers, rnn_cell)
         encoder = tf.keras.layers.RNN(rnn_cell_class(embedding_size, name='encoder'))
+        if bidirectional:
+            encoder = tf.keras.layers.Bidirectional(encoder)
 
         context_encodings = []
         for context_turn in X_context:
@@ -145,7 +148,7 @@ def create_model_personachat(sentiment_features_number,
         mlp = tf.layers.Dense(mlp_sizes[0])
         context_answer = mlp(tf.concat([context_encoding, answer_encoding], axis=-1))
         all_mlp_input = tf.concat([context_answer] + X_mlp_inputs, -1)
-        final_ranking = tf.layers.Dense(1, activation='sigmoid')(all_mlp_input)
+        final_ranking = tf.layers.Dense(2, activation='softmax')(all_mlp_input)
         return (X_context + [X_answer, X_question_sentiment, X_answer_sentiment],
                 final_ranking,
                 y)
@@ -196,8 +199,11 @@ def train(in_model,
             _, train_batch_loss = session.run([train_op, loss_op],
                                               feed_dict=feed_dict)
             train_batch_losses.append(train_batch_loss)
+            if batch_idx % 100 == 0:
+                print('\rProcessed {} out of {} batches'.format(batch_idx, eval_batches), end='')
             if batch_idx == eval_batches - 1:
                 break
+        print('\n')
         dev_eval_loss = evaluate_loss(in_model, dev_data, session)
         print('Epoch {} out of {} results'.format(epoch_counter, epochs))
         print('train loss: {:.3f}'.format(np.mean(train_batch_losses)))
@@ -261,11 +267,14 @@ def evaluate_loss(in_model,
 
     batch_gen = batch_generator(X_test, y_test, sample_weights, batch_size)
     batch_losses = []
-    for batch_x, batch_y, batch_w in batch_gen:
+    for batch_idx, (batch_x, batch_y, batch_w) in enumerate(batch_gen):
+        if batch_idx % 100 == 0:
+            print('\rProcessed {} out of {} eval batches'.format(batch_idx, y_test.shape[0] // batch_size), end='')
         feed_dict = {X_i: batch_x_i for X_i, batch_x_i in zip(X, batch_x)}
         feed_dict.update({y: batch_y, batch_sample_weight: batch_w})
         train_batch_loss = session.run(loss_op, feed_dict=feed_dict)
         batch_losses.append(train_batch_loss)
+    print('\n')
     return np.mean(batch_losses)
 
 

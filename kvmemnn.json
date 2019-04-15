@@ -1,0 +1,12 @@
+{
+  "embeddingsize": 128,
+  "embeddingnorm": 10.0,
+  "tfidf": false,
+  "share_embeddings": true,
+  "optimizer": "sgd",
+  "learningrate": 0.005,
+  "loss": "cosine",
+  "cache-size": 1000,
+  "history-length": 100
+}
+ 
