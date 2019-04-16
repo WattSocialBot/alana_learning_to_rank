@@ -4,17 +4,11 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import argparse
 import math
-import json
-import os
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-import pandas as pd
-
-from .config import get_config, DEFAULT_CONFIG
 
 
 class Kvmemnn(nn.Module):
@@ -110,7 +104,7 @@ class Kvmemnn(nn.Module):
         else:
             return torch.cat(xs_enc)
 
-        
+
 class Encoder(nn.Module):
     def __init__(self, shared_lt, dict):
         super().__init__()
@@ -141,41 +135,3 @@ class Encoder(nn.Module):
             xs_emb = xs_emb.mean(1)
         return xs_emb
 
-
-def build_argument_parser():
-    result = argparse.ArgumentParser()
-    result.add_argument('trainset')
-    result.add_argument('devset')
-    result.add_argument('testset')
-    result.add_argument('model_folder')
-    result.add_argument('--config', default=os.path.join(os.path.dirname(__file__), DEFAULT_CONFIG))
-    result.add_argument('--evaluate', action='store_true', default=False, help='Only evaluate a trained model')
-    return result
-
-
-if __name__ == '__main__':
-    parser = build_argument_parser()
-    args = parser.parse_args()
-    trainset = pd.read_json(args.trainset).sample(frac=1).reset_index(drop=True)
-    devset = pd.read_json(args.devset).sample(frac=1).reset_index(drop=True)
-    testset = pd.read_json(args.testset).sample(frac=1).reset_index(drop=True)
-
-    train_data, dev_data, test_data, rev_vocab = make_training_data(trainset,
-                                                                    devset,
-                                                                    testset,
-                                                                    {},
-                                                                    CONFIG)
-    X, y, X_w = train_data
-    X_dev, y_dev, X_dev_w = dev_data
-    X_test, y_test, X_test_w = test_data
-
-    if not os.path.exists(args.model_folder):
-        os.makedirs(args.model_folder)
-
-    save_vocabulary(rev_vocab, os.path.join(args.model_folder, 'rev_vocab'))
-    with open(os.path.join(args.model_folder, 'config.json'), 'w') as config_out:
-        json.dump(CONFIG, config_out)
-
-    print('Training with config "{}" :'.format(args.config))
-    print(json.dumps(CONFIG, indent=2))
-    kv = Kvmemnn(CONFIG, 128, {})

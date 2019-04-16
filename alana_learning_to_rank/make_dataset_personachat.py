@@ -61,7 +61,7 @@ def process_dataset(in_json, fake_responses_number, randomize_fake_responses):
                          'persona': persona,
                          'target': target,
                          'c_sentiment': c_sentiment,
-                         'a_sentiment': a_sentiment}) 
+                         'a_sentiment': a_sentiment})
 
 
 def build_argument_parser():
