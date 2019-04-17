@@ -8,7 +8,7 @@ from parlai.core.agents import Agent
 from parlai.core.dict import DictionaryAgent
 from parlai.core.utils import round_sigfigs #, maintain_dialog_history
 
-from .modules import Kvmemnn
+from .kvmemnn import Kvmemnn
 
 import torch
 from torch.autograd import Variable

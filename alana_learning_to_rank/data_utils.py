@@ -14,7 +14,7 @@ def tokenize_utterance(in_utterance, add_special_symbols=True, remove_stopwords=
     if remove_stopwords:
         utterance_tokenized = list(filter(lambda token: token not in STOP_LIST, utterance_tokenized))
     if add_special_symbols:
-        utterance_tokenized = ['^'] + utterance_tokenized + ['$']
+        utterance_tokenized = ['_BOS'] + utterance_tokenized + ['_EOS']
     return utterance_tokenized
 
 
@@ -34,6 +34,8 @@ def build_vocabulary(in_sequences, max_size=10000, max_ngram_length=1, add_speci
     if add_special_symbols:
         vocabulary['_PAD'] = 999999999  # hack
         vocabulary['_UNK'] = 999999998  # hack
+        vocabulary['_BOS'] = 999999997
+        vocabulary['_EOS'] = 999999996
     vocab = list(map(itemgetter(0), sorted(vocabulary.items(), key=itemgetter(1), reverse=True)))[:max_size]
     rev_vocab = {word: index for index, word in enumerate(vocab)}
     return vocab, rev_vocab

@@ -6,7 +6,15 @@
   "optimizer": "sgd",
   "learningrate": 0.005,
   "loss": "cosine",
-  "cache-size": 1000,
-  "history-length": 100
+  "cache_size": 1000,
+  "history_length": 100,
+  "truncate": -1,
+  "dict_file": "kvmemnn.dict",
+  "max_vocab_size": 10000,
+  "model_file": "kvmemnn",
+  "margin": 0.3,
+  "batch_size": 32,
+  "num_epochs": 1000,
+  "max_history_length": 100
 }
  

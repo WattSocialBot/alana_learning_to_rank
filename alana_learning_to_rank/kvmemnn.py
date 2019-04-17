@@ -105,6 +105,13 @@ class Kvmemnn(nn.Module):
             return torch.cat(xs_enc)
 
 
+class Dict(object):
+    def __init__(self, in_vocab):
+        freqs = sorted(in_vocab.items(), key=lambda x: x[1], reverse=True)
+        self.ind2tok = [item[0] for item in freqs]
+        self.freqs = [item[1] for item in freqs]
+
+
 class Encoder(nn.Module):
     def __init__(self, shared_lt, dict):
         super().__init__()
