@@ -1,8 +1,6 @@
 from collections import defaultdict, deque
 from operator import itemgetter
-import time
 
-import numpy as np
 import nltk
 
 nltk.download('stopwords')
