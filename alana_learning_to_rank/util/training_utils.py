@@ -19,12 +19,13 @@ def get_loss_function(in_preds,
 
 def batch_generator(data, batch_size, rotate=False):
     batch_start_idx = 0
+    data_len = len(data[0])
     while True:
-        if not rotate and data[0].shape[0] <= batch_start_idx:
+        if not rotate and data_len <= batch_start_idx:
             break
         batch = ([data_i[batch_start_idx: batch_start_idx + batch_size] for data_i in data])
         batch_start_idx += batch_size
         if rotate:
-            batch_start_idx %= data[0].shape[0]
+            batch_start_idx %= data_len
         yield batch
 

@@ -3,18 +3,20 @@
   "embeddingnorm": 10.0,
   "tfidf": false,
   "share_embeddings": true,
-  "optimizer": "sgd",
-  "learningrate": 0.005,
+  "optimizer": "SGD",
+  "learning_rate": 0.005,
   "loss": "cosine",
   "cache_size": 1000,
   "history_length": 100,
-  "truncate": -1,
+  "truncate": 100,
   "dict_file": "kvmemnn.dict",
   "max_vocab_size": 10000,
   "model_file": "kvmemnn",
-  "margin": 0.3,
-  "batch_size": 32,
+  "cosine_loss_margin": 0.1,
+  "batch_size": 1,
   "num_epochs": 1000,
-  "max_history_length": 100
+  "max_history_length": 100,
+  "neg_number": 20,
+  "use_gpu": true
 }
  
