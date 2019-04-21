@@ -33,7 +33,7 @@ class Kvmemnn(nn.Module):
             self.encoder2 = self.encoder
         self.opt = opt
         self.softmax = nn.Softmax(dim=1)
-        self.cosine = nn.CosineSimilarity()
+        self.cosine = nn.CosineSimilarity(dim=-1)
 
         self.lin1 = nn.Linear(opt['embeddingsize'], opt['embeddingsize'], bias=False)
         self.lin2 = nn.Linear(opt['embeddingsize'], opt['embeddingsize'], bias=False)
@@ -52,22 +52,22 @@ class Kvmemnn(nn.Module):
         xs_emb = self.encoder(xs)
 
         if len(mems) > 0 and self.hops > 0:
-            mem_enc = []
-            for m in mems:
-                mem_enc.append(self.encoder(m))
-            mem_enc.append(xs_emb)
-            mems_enc = torch.cat(mem_enc)
+            mem_enc = [self.encoder(mems), xs_emb.unsqueeze(1)]
+            #for m in mems:
+            #    mem_enc.append(self.encoder(m))
+            #mem_enc.append(xs_emb)
+            mems_enc = torch.cat(mem_enc, dim=1)
             self.layer_mems = mems
-            layer2 = self.cosine(xs_emb, mems_enc).unsqueeze(0)
+            layer2 = self.cosine(xs_emb.unsqueeze(1), mems_enc)  # .unsqueeze(0)
             self.layer2 = layer2
-            layer3 = self.softmax(layer2)
+            layer3 = self.softmax(layer2).unsqueeze(1)
             self.layer3 = layer3
-            lhs_emb = torch.mm(layer3, mems_enc)
+            lhs_emb = torch.bmm(layer3, mems_enc)
 
             if self.lins > 0:
                 lhs_emb = self.lin1(lhs_emb)
             if self.hops > 1:
-                layer4 = self.cosine(lhs_emb, mems_enc).unsqueeze(0)
+                layer4 = self.cosine(lhs_emb, mems_enc)  # .unsqueeze(0)
                 layer5 = self.softmax(layer4)
                 self.layer5 = layer5
                 lhs_emb = torch.mm(layer5, mems_enc)
@@ -82,12 +82,14 @@ class Kvmemnn(nn.Module):
             # training
             if self.cosineEmbedding:
                 ys_enc = []
-                xs_enc.append(lhs_emb)
-                ys_enc.append(self.encoder2(ys))
-                for c in cands:
-                    xs_enc.append(lhs_emb)
-                    c_emb = self.encoder2(c)
-                    ys_enc.append(c_emb)
+                xs_enc = lhs_emb.repeat(1, cands.shape[1] + 1, 1)
+                ys_enc.append(self.encoder2(ys).unsqueeze(1))
+                c_emb = self.encoder2(cands)
+                ys_enc.append(c_emb)
+                # for c in cands:
+                #     xs_enc.append(lhs_emb)
+                #     c_emb = self.encoder2(c)
+                #     ys_enc.append(c_emb)
             else:
                 xs_enc.append(lhs_emb.dot(self.encoder2(ys)))
                 for c in cands:
@@ -106,7 +108,7 @@ class Kvmemnn(nn.Module):
                     c_emb = self.encoder2(c)
                     xs_enc.append(lhs_emb.dot(c_emb))
         if self.cosineEmbedding:
-            return torch.cat(xs_enc), torch.cat(ys_enc)
+            return xs_enc, torch.cat(ys_enc, dim=1)
         else:
             return torch.cat(xs_enc)
 
@@ -145,6 +147,6 @@ class Encoder(nn.Module):
             xs_emb = xs_emb.squeeze(0).t().matmul(w.unsqueeze(1)).t()
         else:
             # basic embeddings (faster)
-            xs_emb = xs_emb.mean(1)
+            xs_emb = xs_emb.mean(-2)
         return xs_emb
 

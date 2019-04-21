@@ -2,6 +2,7 @@ from collections import defaultdict, deque
 from operator import itemgetter
 
 import nltk
+import tensorflow as tf
 
 nltk.download('stopwords')
 STOP_LIST = nltk.corpus.stopwords.words('english')
@@ -45,3 +46,15 @@ def vectorize_sequences(in_sequences, in_rev_vocab):
 def vectorize_sequence(in_sequence, in_rev_vocab):
     unk_id = in_rev_vocab['_UNK']
     return [in_rev_vocab.get(word, unk_id) for word in in_sequence]
+
+
+# a padding a batch of sequence-sequences
+def pad_3d_batch(batch, truncate, **kwargs):
+    max_seq_len = max([len(seq) for seq in batch])
+
+    result = []
+    for elem in batch:
+        padded_1d = tf.keras.preprocessing.sequence.pad_sequences(elem, truncate)
+        padded_2d = tf.keras.preprocessing.sequence.pad_sequences([padded_1d], max_seq_len)[0]
+        result.append(padded_2d)
+    return result

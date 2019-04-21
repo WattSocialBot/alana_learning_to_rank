@@ -18,7 +18,7 @@ from alana_learning_to_rank.util.training_utils import batch_generator
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ParlAI'))
 
 from alana_learning_to_rank.kvmemnn import Kvmemnn
-from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequence, vectorize_sequences
+from .data_utils import build_vocabulary, tokenize_utterance, vectorize_sequence, vectorize_sequences, pad_3d_batch
 from .config import get_config, DEFAULT_CONFIG
 
 
@@ -44,6 +44,7 @@ def long_tensor_type(use_gpu, **kwargs):
 def float_tensor_type(use_gpu, **kwargs):
     return torch.cuda.FloatTensor if use_gpu else torch.FloatTensor
 
+
 def train(in_model, in_trainset, in_vocab, batch_size, num_epochs, truncate, cosine_loss_margin, learning_rate, optimizer, **kwargs):
     long_tensor_t = long_tensor_type(**kwargs)
     float_tensor_t = float_tensor_type(**kwargs)
@@ -56,17 +57,19 @@ def train(in_model, in_trainset, in_vocab, batch_size, num_epochs, truncate, cos
             print('Processing batch {}\r'.format(batch_idx), end='')
             opt.zero_grad()
             xs, mems, ys, cands = batch
+
             xs = tf.keras.preprocessing.sequence.pad_sequences(xs, truncate)
-            mems = [tf.keras.preprocessing.sequence.pad_sequences([mems_i], truncate) for mems_i in mems[0]]
-            cands = [tf.keras.preprocessing.sequence.pad_sequences([cands_i], truncate) for cands_i in cands[0]]
+            mems = pad_3d_batch(mems, truncate, **kwargs)
+            cands = pad_3d_batch(cands, truncate, **kwargs)
             ys = tf.keras.preprocessing.sequence.pad_sequences(ys, truncate)
             xe, ye = in_model(Variable(long_tensor_t(xs)),
                               Variable(long_tensor_t(mems)),
                               Variable(long_tensor_t(ys)),
                               Variable(long_tensor_t(cands)))
-            y = Variable(-float_tensor_t(xe.size(0)).fill_(1.0))
-            y[0]= 1
-            loss = torch.nn.CosineEmbeddingLoss(margin=cosine_loss_margin, size_average=False)(xe, ye, y)
+            y = Variable(float_tensor_t(xe.shape[:-1]).fill_(-1.0))
+            y[:,0]= 1
+            emb_size = xe.shape[-1]
+            loss = torch.nn.CosineEmbeddingLoss(margin=cosine_loss_margin, reduce='sum')(xe.view(-1, emb_size), ye.view(-1, emb_size), y.view(-1))
             loss.backward()
             opt.step()
     print('')

@@ -13,10 +13,10 @@
   "max_vocab_size": 10000,
   "model_file": "kvmemnn",
   "cosine_loss_margin": 0.1,
-  "batch_size": 1,
+  "batch_size": 32,
   "num_epochs": 1000,
   "max_history_length": 100,
   "neg_number": 20,
-  "use_gpu": true
+  "use_gpu": true 
 }
  
