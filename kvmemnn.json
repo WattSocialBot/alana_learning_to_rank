@@ -9,6 +9,8 @@
   "cache_size": 1000,
   "history_length": 100,
   "truncate": 100,
+  "ckpt_steps": 400,
+  "early_stopping_threshold": 10,
   "dict_file": "kvmemnn.dict",
   "max_vocab_size": 10000,
   "model_file": "kvmemnn",
@@ -17,6 +19,6 @@
   "num_epochs": 1000,
   "max_history_length": 100,
   "neg_number": 20,
-  "use_gpu": true 
+  "use_gpu": false 
 }
  
